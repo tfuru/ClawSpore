@@ -35,9 +35,13 @@ class PostFileToDiscordTool(BaseTool):
         
         # セッションIDがある場合、ワークスペース内を優先的に探す
         if session_id and not os.path.isabs(file_path):
+            # 1. ワークスペース内を探す
             workspace_path = os.path.join(os.getcwd(), "workspaces", session_id, file_path)
             if os.path.exists(workspace_path):
                 upload_path = workspace_path
+            # 2. ルートディレクトリも探す (フォールバック)
+            elif os.path.exists(os.path.join(os.getcwd(), file_path)):
+                upload_path = os.path.join(os.getcwd(), file_path)
         
         # discord_send_callback を kwargs から取得
         send_callback = kwargs.get("discord_send_callback")
@@ -46,11 +50,13 @@ class PostFileToDiscordTool(BaseTool):
             return "Error: Discord への投稿機能（コールバック）が利用できません。"
             
         if not os.path.exists(upload_path):
-            return f"Error: ファイル '{file_path}' が見つかりませんでした。"
+            return f"Error: ファイル '{file_path}' が見つかりませんでした。(検索パス: {upload_path})"
             
         try:
             # コールバックを使用して Discord に送信
             await send_callback(text=text, file_path=upload_path)
             return f"✅ ファイル '{os.path.basename(upload_path)}' を Discord に投稿しました。"
         except Exception as e:
-            return f"❌ 投稿に失敗しました: {str(e)}"
+            import traceback
+            error_details = traceback.format_exc()
+            return f"❌ 投稿に失敗しました: {str(e)}\n\n詳細:\n{error_details}"
