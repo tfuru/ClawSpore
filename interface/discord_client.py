@@ -360,22 +360,32 @@ class ClawSporeClient(discord.Client):
                         async def send_callback(text, file_path=None):
                             import os
                             file = None
-                            if file_path and os.path.exists(file_path):
-                                file = discord.File(file_path)
+                            if file_path:
+                                if os.path.exists(file_path):
+                                    print(f"DEBUG: send_callback attaching file: {file_path}")
+                                    file = discord.File(file_path)
+                                else:
+                                    print(f"DEBUG: send_callback file NOT FOUND: {file_path}")
                             
-                            if not text and file:
+                            # text が None の場合は空文字列に変換
+                            safe_text = str(text) if text is not None else ""
+                            
+                            # ファイルのみの送信
+                            if not safe_text and file:
                                 await message.channel.send(file=file)
                                 return
 
-                            if len(text) > 2000:
-                                chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
+                            # 2000文字制限の処理
+                            if len(safe_text) > 2000:
+                                chunks = [safe_text[i:i+2000] for i in range(0, len(safe_text), 2000)]
                                 for i, chunk in enumerate(chunks):
-                                    if i == len(chunks) - 1 and file:
+                                    # 最初のチャンクにファイルを添付する
+                                    if i == 0 and file:
                                         await message.channel.send(chunk, file=file)
                                     else:
                                         await message.channel.send(chunk)
                             else:
-                                await message.channel.send(text, file=file)
+                                await message.channel.send(safe_text, file=file)
 
                         # セッションIDとしてチャンネルIDを利用（チャンネルごとのコンテキストを維持）
                         session_id = str(message.channel.id)
