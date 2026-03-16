@@ -10,7 +10,8 @@ class Agent:
         self.system_prompt = """You are ClawSpore, an autonomous AI assistant capable of reasoning and executing tools.
 When you receive a request, you can use your tools to gather information before answering.
 If you use a tool, wait for the result and then think about the next step based on the result.
-Always reply in Japanese unless instructed otherwise."""
+Always reply in Japanese unless instructed otherwise.
+余計な雑談や指示に関係のない話題（余談）をレスポンスに含めないでください。常に簡潔かつ指示に忠実に応答してください。"""
         self.acl_path = "core/data/acl.json"
 
     def _get_acl(self) -> dict:
@@ -177,9 +178,39 @@ IMPORTANT:
                     print(f"DEBUG: LLM requested {len(response_msg.tool_calls)} tool calls.")
                     for call in response_msg.tool_calls:
                         print(f"DEBUG: Call ID: {call.id}, Tool: {call.function.name}, Args: {call.function.arguments}")
-                elif hasattr(response_msg, "content"):
+                elif hasattr(response_msg, "content") and response_msg.content:
                     content_preview = (response_msg.content[:100] + "...") if response_msg.content else "None"
                     print(f"DEBUG: LLM response content: {content_preview}")
+                    
+                    # ローカルモデルが Tool Call API を使わずにテキストで記述した場合のパース (擬似 Tool Call)
+                    # 形式: call:tool_name({"arg": "val"}) または ```json\n{"tool": "...", "args": {...}}\n``` などに対応
+                    if not (hasattr(response_msg, "tool_calls") and response_msg.tool_calls):
+                        import re
+                        # 1. call:name(args) 形式
+                        matches = re.finditer(r'call:(\w+)\((.*?)\)', response_msg.content, re.DOTALL)
+                        pseudo_calls = []
+                        for m in matches:
+                            t_name = m.group(1)
+                            t_args_str = m.group(2).strip()
+                            try:
+                                t_args = json.loads(t_args_str) if t_args_str else {}
+                            except:
+                                t_args = {"raw_args": t_args_str}
+                            
+                            class PseudoFunction:
+                                def __init__(self, name, args):
+                                    self.name = name
+                                    self.arguments = json.dumps(args, ensure_ascii=False)
+                            class PseudoCall:
+                                def __init__(self, name, args):
+                                    self.id = f"pseudo_{os.urandom(4).hex()}"
+                                    self.function = PseudoFunction(name, args)
+                            
+                            pseudo_calls.append(PseudoCall(t_name, t_args))
+                        
+                        if pseudo_calls:
+                            print(f"DEBUG: Detected {len(pseudo_calls)} pseudo tool calls from content.")
+                            response_msg.tool_calls = pseudo_calls
             except Exception as e:
                 return f"LLM通信エラー: {e}"
                 
