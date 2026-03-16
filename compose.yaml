@@ -1,0 +1,22 @@
+services:
+  core:
+    build: .
+    container_name: clawspore-core
+    command: ["dotenvx", "run", "--", "python", "core/main.py"]
+    volumes:
+      - .:/app
+    environment:
+      - DOTENV_PRIVATE_KEY=${DOTENV_PRIVATE_KEY}
+      - TZ=Asia/Tokyo
+      - PYTHONPATH=.
+      - PYTHONUNBUFFERED=1
+      - PODMAN_SOCKET=ssh://core@host.containers.internal:49441/run/user/501/podman/podman.sock
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: clawspore-network

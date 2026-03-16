@@ -1,0 +1,20 @@
+{
+  "DEFAULT_PERMISSIONS": {
+    "allow_all": false,
+    "allowed_tools": [
+      "gemini_search",
+      "youtube_search",
+      "get_time",
+      "get_website_info",
+      "steam_store_search_search_games",
+      "rag_search"
+    ],
+    "denied_tools": []
+  },
+  "USERS": {
+    "REPLACE_WITH_YOUR_ADMIN_ID": {
+      "allow_all": true,
+      "note": "Administrator"
+    }
+  }
+}

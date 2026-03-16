@@ -1,0 +1,6 @@
+{
+  "steam_store_search": {
+    "command": "podman run -i --rm docker.io/library/steam-store-search-mcp-mcp-server:latest",
+    "env": {}
+  }
+}
