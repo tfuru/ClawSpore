@@ -20,11 +20,30 @@ class CustomJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+import re
+
 class Memory:
     """
     セッション（ユーザーやチャンネル）ごとの会話履歴とツール実行履歴を管理し、
     ディスクへの永続化をサポートします。
     """
+    def _clean_for_rag(self, text: str) -> str:
+        """長期記憶 (RAG) に登録する前に、テクニカルなノイズを除去する"""
+        if not text:
+            return ""
+        
+        # 1. 複合パターンの除去 (Traceback + Source Code)
+        # registry.py が出力する形式: --- Traceback --- ... --- Tool Source Code (xxx) --- ...
+        text = re.sub(r'--- Traceback ---.*?--- Tool Source Code \(.*?\) ---.*?(?=\n\n|\Z|Please analyze)', '[Technical error details omitted]\n', text, flags=re.DOTALL)
+        
+        # 2. Traceback 単体の除去
+        text = re.sub(r'--- Traceback ---.*?(?=\n\n|\Z)', '[Traceback omitted]', text, flags=re.DOTALL)
+        
+        # 3. Source Code 単体の除去
+        text = re.sub(r'--- Tool Source Code \(.*?\) ---.*?(?=\n\n|\Z)', '[Source code omitted]', text, flags=re.DOTALL)
+        
+        return text.strip()
+
     def __init__(self, st_dir: str = "core/data/sessions", lt_dir: str = "core/data/long_term"):
         self.sessions: Dict[str, List[Dict[str, Any]]] = {}
         self.long_term_memories: Dict[str, List[str]] = {}
@@ -140,13 +159,15 @@ class Memory:
 
         # RAG 用にインデックス登録
         if vector_store and role in ["user", "assistant"]:
-            msg_id = str(uuid.uuid4())
-            vector_store.add_message(
-                session_id=session_id,
-                message_id=msg_id,
-                text=content or "",
-                metadata={"role": role, "timestamp": now}
-            )
+            cleaned_text = self._clean_for_rag(content or "")
+            if cleaned_text:
+                msg_id = str(uuid.uuid4())
+                vector_store.add_message(
+                    session_id=session_id,
+                    message_id=msg_id,
+                    text=cleaned_text,
+                    metadata={"role": role, "timestamp": now}
+                )
 
     def add_raw_message(self, session_id: str, message_dict: Dict[str, Any]):
         self._ensure_session(session_id)
@@ -165,12 +186,13 @@ class Memory:
         if vector_store:
             role = sanitized_msg.get("role")
             content = sanitized_msg.get("content")
-            if role in ["user", "assistant"] and content:
+            cleaned_text = self._clean_for_rag(content)
+            if role in ["user", "assistant"] and cleaned_text:
                 msg_id = str(uuid.uuid4())
                 vector_store.add_message(
                     session_id=session_id,
                     message_id=msg_id,
-                    text=content,
+                    text=cleaned_text,
                     metadata={"role": role, "timestamp": now}
                 )
 

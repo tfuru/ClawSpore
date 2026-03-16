@@ -11,11 +11,16 @@ class Agent:
 When you receive a request, you can use your tools to gather information before answering.
 If you use a tool, wait for the result and then think about the next step based on the result.
 Always reply in Japanese unless instructed otherwise.
-余計な雑談や指示に関係のない話題（余談）をレスポンスに含めないでください。常に簡潔かつ指示に忠実に応答してください。"""
+余計な雑談や指示に関係のない話題（余談）をレスポンスに含めないでください。常に簡潔かつ指示に忠実に応答してください。
+
+### ツール利用の厳格なルール:
+1. YouTubeの動画を検索する際は、ブラウザ閲覧ではなく必ず `youtube_search` ツールを使用してください。
+2. ツールが提供されている場合、その実行結果を待たずに自分で結果やURLを捏造（ハルシネーション）することは厳禁です。
+3. ツールが「[]」や空の結果を返した場合は、正直に「見つかりませんでした」と答えてください。"""
         self.acl_path = "core/data/acl.json"
 
     def _get_acl(self) -> dict:
-        """ACL設定ファイルを読み込む"""
+        """ACL設定ファイルを毎回読み込み、常に最新の状態を反映させる"""
         if os.path.exists(self.acl_path):
             try:
                 with open(self.acl_path, "r", encoding="utf-8") as f:
@@ -147,7 +152,7 @@ IMPORTANT:
             rag_context = memory.get_relevant_history(session_id, prompt)
             if rag_context:
                 # 関連する履歴がある場合、「あなたが思い出している記憶」として自然に挿入
-                rag_msg = {"role": "system", "content": f"### あなたが思い出している関連する過去の記憶\n以下の内容は過去のやり取りからあなたが思い出した断片です。これに基づいて矛盾のないよう対話してください：\n{rag_context}"}
+                rag_msg = {"role": "system", "content": f"### あなたが思い出した関連する過去の記憶（断片）\n以下の内容は過去のやり取りからあなたが思い出した断片的な記憶です。これらはあくまで参考とし、現在のユーザーの意図や最新の状況と矛盾がある場合は、常に「最新の指示と状況」を優先して対話してください：\n{rag_context}"}
                 messages = ([system_msg] if system_msg else []) + [rag_msg] + recent_context
             else:
                 messages = ([system_msg] if system_msg else []) + recent_context
