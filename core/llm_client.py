@@ -162,27 +162,34 @@ class LLMClient:
                     if not isinstance(schema, dict): return schema
                     return {k: sanitize_schema(v) for k, v in schema.items() if k != "default"}
                 
-                # Check if gemini_search is requested
-                has_gemini_search = any(td.get("function", {}).get("name") == "gemini_search" for td in tool_definitions if isinstance(td, dict))
-
-                if has_gemini_search:
-                    # Google Search cannot be combined with Function Calling
-                    tools.append(types.Tool(google_search=types.GoogleSearch()))
-                else:
-                    gemini_functions = []
-                    for td in tool_definitions:
-                        if not isinstance(td, dict): continue
-                        f = td.get("function")
-                        if not f or not f.get("name"): continue
+                # 通常の関数（gemini_search 以外）を抽出
+                gemini_functions = []
+                has_gemini_search = False
+                for td in tool_definitions:
+                    if not isinstance(td, dict): continue
+                    f = td.get("function")
+                    if not f or not f.get("name"): continue
+                    
+                    if f.get("name") == "gemini_search":
+                        has_gemini_search = True
+                        continue
                         
-                        params = sanitize_schema(f.get("parameters", {}))
-                        gemini_functions.append(types.FunctionDeclaration(
-                            name=f.get("name"),
-                            description=f.get("description", ""),
-                            parameters=params
-                        ))
-                    if gemini_functions:
-                        tools.append(types.Tool(function_declarations=gemini_functions))
+                    params = sanitize_schema(f.get("parameters", {}))
+                    gemini_functions.append(types.FunctionDeclaration(
+                        name=f.get("name"),
+                        description=f.get("description", ""),
+                        parameters=params
+                    ))
+                
+                # Google Search と Function Calling は現在共存できない（いずれかが無効化される）ため、
+                # 通常のツールがある場合は、通常のツールを優先して登録する。
+                # ただし、通常のツールがなく gemini_search のみがある場合は Google Search を有効にする。
+                if gemini_functions:
+                    tools.append(types.Tool(function_declarations=gemini_functions))
+                    # 通常のツールがある場合でも、gemini_search を提供したい場合はここでの判断が必要だが、
+                    # 現状の SDK/API の制約を回避するため、通常のツール（youtube_search等）を優先。
+                elif has_gemini_search:
+                    tools.append(types.Tool(google_search=types.GoogleSearch()))
             
             if not tools:
                 tools = None

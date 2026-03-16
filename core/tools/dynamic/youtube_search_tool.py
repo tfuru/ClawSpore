@@ -68,6 +68,17 @@ class YouTubeSearchTool(BaseTool):
             if not videos:
                 return "[]"
             
+            # Discord への直接報告 (kwargs に discord_send_callback がある場合)
+            send_callback = kwargs.get("discord_send_callback")
+            if send_callback:
+                report_text = f"📺 YouTube 検索結果 (`{query}`):\n"
+                for i, v in enumerate(videos[:5], 1):
+                    report_text += f"{i}. {v['title']}\n   <{v['url']}>\n"
+                try:
+                    await send_callback(report_text)
+                except Exception as cb_e:
+                    print(f"DEBUG: Error in youtube_search callback: {cb_e}")
+            
             # JSON形式で返すことでLLMのパース精度を向上させる
             return json.dumps(videos[:5], ensure_ascii=False, indent=2)
         except Exception as e:
