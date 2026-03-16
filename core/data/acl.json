@@ -7,7 +7,8 @@
       "get_time",
       "get_website_info",
       "steam_store_search_search_games",
-      "rag_search"
+      "rag_search",
+      "vision_analyze"
     ],
     "denied_tools": []
   },

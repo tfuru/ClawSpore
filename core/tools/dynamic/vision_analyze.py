@@ -29,7 +29,14 @@ class VisionAnalyzeTool(BaseTool):
             'required': ['image_url']
         }
 
-    async def execute(self, image_url: str, prompt: str = "この画像の内容を詳しく説明してください。", **kwargs) -> Any:
+    async def execute(self, image_url: str = None, prompt: str = "この画像の内容を詳しく説明してください。", **kwargs) -> Any:
+        # 引数名の揺れ（url ではなく image_url）に対応
+        if not image_url:
+            image_url = kwargs.get('url')
+        
+        if not image_url:
+            return "Error: image_url が指定されていません。"
+
         try:
             # 画像のダウンロード
             response = requests.get(image_url, timeout=10)

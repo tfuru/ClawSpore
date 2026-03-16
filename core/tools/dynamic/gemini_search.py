@@ -24,7 +24,15 @@ class GeminiSearchTool(BaseTool):
             'required': ['queries']
         }
 
-    async def execute(self, queries: list, **kwargs) -> Any:
+    async def execute(self, queries: list = None, **kwargs) -> Any:
+        # 他の LLM (gemma等) が 'query' (str) で呼ぶ場合も考慮して柔軟に対応
+        query = kwargs.get('query')
+        if not queries and query:
+            queries = [query]
+        
+        if not queries:
+            return "Error: queries (list) または query (string) が必要です。"
+
         # このツールは LLMClient 側で Google Search グラウンディングを有効化するためのトリガーです。
         # Gemini が実際に検索を実行した場合、結果は Gemini SDK によって直接回答に組み込まれます。
         # もし Gemini が検索を実行せずにこの関数を呼び出した場合のフォールバックとしてメッセージを返します。
