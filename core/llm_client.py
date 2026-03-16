@@ -112,7 +112,22 @@ class LLMClient:
                 if role == "system":
                     system_instruction = content
                 elif role == "user":
-                    contents.append(types.Content(role="user", parts=[types.Part(text=content)]))
+                    parts = []
+                    if isinstance(content, str):
+                        parts.append(types.Part(text=content))
+                    elif isinstance(content, list):
+                        # マルチモーダル：テキストと画像（Partオブジェクト相当の辞書など）のリストを想定
+                        for item in content:
+                            if isinstance(item, str):
+                                parts.append(types.Part(text=item))
+                            elif isinstance(item, dict):
+                                if "text" in item:
+                                    parts.append(types.Part(text=item["text"]))
+                                elif "inline_data" in item:
+                                    data = item["inline_data"]
+                                    mime_type = item.get("mime_type", "image/png")
+                                    parts.append(types.Part(inline_data=types.Blob(mime_type=mime_type, data=data)))
+                    contents.append(types.Content(role="user", parts=parts))
                 elif role == "assistant":
                     parts = []
                     if content:
