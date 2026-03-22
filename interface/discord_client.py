@@ -10,12 +10,17 @@ class ClawSporeClient(discord.Client):
         self.log_channel = None
         self.processing_messages = set() # 重複処理防止用
         
-        # 無反応時間監視用
-        self.last_activity_time = datetime.datetime.now(datetime.timezone.utc)
-        self.last_channel_id = None
+        # 自律性管理マネージャーの初期化
+        from core.agent import agent
+        from core.autonomy import AutonomyManager
+        self.autonomy_manager = AutonomyManager(
+            agent=agent,
+            send_callback=self._autonomy_send_callback,
+            log_callback=self._autonomy_log_callback
+        )
         
         # バックグラウンドタスクの開始
-        self.check_inactivity.start()
+        self.autonomy_manager.start()
 
     async def on_ready(self):
         print(f'Logged on as {self.user}!')
@@ -61,9 +66,29 @@ class ClawSporeClient(discord.Client):
             except Exception as e:
                 print(f"DEBUG: Error in check_inactivity task: {e}")
 
-    @check_inactivity.before_loop
-    async def before_check_inactivity(self):
-        await self.wait_until_ready()
+    async def _autonomy_send_callback(self, text, channel_id, file_path=None):
+        """AutonomyManager からのメッセージ送信依頼を処理する"""
+        try:
+            channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+            if channel:
+                # Agent の汎用コールバックを流用できるか検討したが、
+                # ここではシンプルに送信のみを行う
+                if len(text) > 2000:
+                    chunks = [text[i:i+1900] for i in range(0, len(text), 1900)]
+                    for chunk in chunks:
+                        await channel.send(chunk)
+                else:
+                    await channel.send(text)
+        except Exception as e:
+            print(f"DEBUG: Error in _autonomy_send_callback: {e}")
+
+    async def _autonomy_log_callback(self, text):
+        """AutonomyManager からのログ出力をログチャンネルに転送する"""
+        if self.log_channel:
+            try:
+                await self.log_channel.send(f"🕵️ {text}")
+            except Exception:
+                pass
 
     async def _prepare_log_channel(self):
         """全てのサーバーでログチャンネルを確認し、どこにもなければ作成する"""
@@ -107,9 +132,8 @@ class ClawSporeClient(discord.Client):
         if message.author == self.user:
             return
 
-        # アクティビティ情報の更新
-        self.last_activity_time = datetime.datetime.now(datetime.timezone.utc)
-        self.last_channel_id = message.channel.id
+        # アクティビティ情報の更新 (AutonomyManager へ通知)
+        self.autonomy_manager.update_activity(message.channel.id)
 
         try:
             # 重複排除ガード: 既に処理中のメッセージIDなら無視
@@ -140,6 +164,7 @@ class ClawSporeClient(discord.Client):
             is_clear = message.content.startswith('!clear')
             is_clear_all = message.content.startswith('!clear_all')
             is_check_memory = message.content.startswith('!check_memory')
+            is_patrol = message.content.startswith('!patrol')
             is_help = message.content.startswith('!help')
             
             # MCP サーバー追加 (!add_mcp)
@@ -233,11 +258,18 @@ class ClawSporeClient(discord.Client):
 - `!check_memory [mode]` : 記憶を表示します（mode: short=履歴, long=サマリー, search=検索）。
 - `!clear` : 現在のチャンネルの短期記憶のみをクリアします（長期記憶は維持）。
 - `!clear_all` : 短期記憶と長期記憶の両方を完全にリセットします。
+- `!patrol` : 自律監視（巡回）タスクを今すぐ手動で実行します。
 - `!hello` : Bot の生存確認（挨拶）を行います。
 - `!help` : このヘルプメニューを表示します。
 
 ※ 上記以外のメッセージはすべて AI への問いかけとして処理されます。"""
                 await message.channel.send(help_msg)
+                return
+
+            # 手動巡回 (!patrol)
+            if is_patrol:
+                await message.channel.send("🕵️ **手動巡回を開始します...**")
+                await self.autonomy_manager.run_manual_patrol(message.channel.id)
                 return
 
             # ツール削除 (!remove_tool)
