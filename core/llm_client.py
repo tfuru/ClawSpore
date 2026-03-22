@@ -59,29 +59,53 @@ class LLMClient:
         messages = [recursive_sanitize(msg) for msg in messages]
 
         # LM Studio (Local) 向けのロール正規化:
-        # 1. 'tool' ロールを 'user' へ変換
-        # 2. ロールが連続する場合にマージ
-        normalized = []
-        for msg in messages:
-            role = msg["role"]
+        # 1. ロール変換 (i > 0 の system や tool は user へ)
+        converted = []
+        for i, msg in enumerate(messages):
+            role = msg.get("role")
             content = msg.get("content") or ""
             
-            # [EXECUTION RESULT] などの内部用タグを local model には見せないように除去 (ハルシネーション防止)
+            # クレンジング (内部タグ除去)
             import re
             content = re.sub(r'\[EXECUTION RESULT\].*?\[END OF RESULT\]', lambda m: m.group(0).replace("[EXECUTION RESULT]", "").replace("[END OF RESULT]", ""), content, flags=re.DOTALL)
             content = re.sub(r'\[TOOL_RESULT\].*?\[END_TOOL_RESULT\]', lambda m: m.group(0).replace("[TOOL_RESULT]", "").replace("[END_TOOL_RESULT]", ""), content, flags=re.DOTALL)
 
-            # tool ロールの平坦化
-            if role == "tool":
-                role = "user"
-                # 「システムが報告した結果」として簡潔に提示
+            if role == "system" and i == 0:
+                new_role = "system"
+            elif role == "tool":
+                new_role = "user"
                 content = f"### システムからの報告 (ツール: {msg.get('name', 'unknown')} の実行結果)\n{content.strip()}"
-            
-            if normalized and normalized[-1]["role"] == role:
-                if content:
-                    normalized[-1]["content"] = (normalized[-1].get("content", "") + "\n\n" + content).strip()
             else:
-                normalized.append({"role": role, "content": content})
+                new_role = "user" if role == "system" else role
+            
+            converted.append({"role": new_role, "content": content})
+
+        # 2. ロールの交互性 (Alternation) の修正
+        # 多くのローカル LLM (Qwen, Llama3 等) は system -> user -> assistant -> user... を要求する
+        normalized = []
+        for msg in converted:
+            if not normalized:
+                normalized.append(msg)
+                continue
+            
+            prev_role = normalized[-1]["role"]
+            curr_role = msg["role"]
+            
+            if prev_role == curr_role:
+                # 同じロールが続く場合はマージ (LM Studio 等の API 制約対策)
+                normalized[-1]["content"] += f"\n\n{msg['content']}"
+            elif prev_role == "system" and curr_role == "assistant":
+                # system の直後に assistant が来るのは禁止 (user を挟む必要がある)
+                # 解決策: 履歴の不備として assistant を user に変換してマージャーするか、スキップする
+                normalized.append({"role": "user", "content": f"(Context continue): {msg['content']}"})
+            else:
+                normalized.append(msg)
+        
+        # 3. 最終チェック: system の直後は必ず user でなければならない
+        if len(normalized) > 1 and normalized[0]["role"] == "system" and normalized[1]["role"] == "assistant":
+            # (念のための再チェック) 先頭付近の assistant を user に変更して順序を守る
+            normalized[1]["role"] = "user"
+            normalized[1]["content"] = f"(Initial Context): {normalized[1]['content']}"
 
         try:
             params = {"model": model, "messages": normalized, "temperature": 0.7}
@@ -167,7 +191,8 @@ class LLMClient:
                     contents.append(types.Content(role="tool", parts=[
                         types.Part(function_response=types.FunctionResponse(
                             name=msg.get("name") or "unknown",
-                            response={"result": msg.get("content") or ""}
+                            response={"result": msg.get("content") or ""},
+                            id=msg.get("tool_call_id") # 必須: 対応する tool_call の ID
                         ))
                     ]))
 

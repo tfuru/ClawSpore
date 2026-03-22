@@ -39,10 +39,14 @@ class MCPToolWrapper(BaseTool):
 
     async def execute(self, **kwargs) -> Any:
         try:
-            # 引数の型変換 (LLM が文字列で渡してくることがあるため、Schema に合わせる)
+            # 引数のフィルタリングと型変換 (LLM が文字列で渡してくることがあるため、Schema に合わせる)
+            # 内部的な引数 (session_id, discord_send_callback など) は MCP サーバーに送らないようにする
             processed_args = {}
             properties = self._parameters.get("properties", {})
             for k, v in kwargs.items():
+                if k not in properties:
+                    continue # スキーマに定義されていない引数は無視
+                
                 target_type = properties.get(k, {}).get("type")
                 if target_type == "integer" and isinstance(v, str):
                     try:
