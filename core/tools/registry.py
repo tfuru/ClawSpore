@@ -31,6 +31,13 @@ class ToolRegistry:
         """全てのツールの定義をリスト形式で取得 (LLM 用)"""
         return [tool.to_tool_def() for tool in self._tools.values()]
 
+    def get_tools_overview(self) -> str:
+        """全てのツールの名前と説明の概要を取得 (ルーター用)"""
+        overview = []
+        for tool in self._tools.values():
+            overview.append(f"- {tool.name}: {tool.description}")
+        return "\n".join(overview)
+
     def get_tool_source(self, name: str) -> str:
         """指定されたツールのソースコードを取得する"""
         tool = self.get_tool(name)

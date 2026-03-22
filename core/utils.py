@@ -55,5 +55,40 @@ def recursive_sanitize(obj: Any, parent_key: str = None) -> Any:
     except (TypeError, OverflowError):
         # メソッドなどは文字列にするが、dict は絶対に文字列にしない
         if isinstance(obj, dict):
-             return {str(k): recursive_sanitize(v, parent_key=str(k)) for k, v in obj.items() if not str(k).startswith("_")}
+            return {str(k): recursive_sanitize(v, parent_key=str(k)) for k, v in obj.items() if not str(k).startswith("_")}
         return str(obj)
+
+async def is_url_reachable(url: str) -> bool:
+    """
+    指定された URL が実在するかどうかを確認する。
+    """
+    import httpx
+    import re
+    import urllib3
+
+    # SSL 警告の抑制
+    urllib3.disable_warnings()
+
+    # URL 形式の簡易チェック
+    if not re.match(r'https?://[\w/:%#\$&\?\(\)~\.=\+\-]+', url):
+        return False
+
+    try:
+        # User-Agent を設定して通常のブラウザを装う（ブロック回避）
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        
+        async with httpx.AsyncClient(follow_redirects=True, verify=False, headers=headers) as client:
+            # 高速化のため HEAD リクエストを試行
+            response = await client.head(url, timeout=5.0)
+            if response.is_success:
+                return True
+            
+            # HEAD が許可されていない場合（405等）は GET を試行
+            if 400 <= response.status_code < 500:
+                response = await client.get(url, timeout=5.0)
+                return response.is_success
+            
+            return False
+    except Exception as e:
+        print(f"DEBUG: URL check failed for {url}: {e}")
+        return False
