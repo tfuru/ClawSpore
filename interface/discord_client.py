@@ -1,5 +1,7 @@
 import discord
 import os
+import datetime
+from discord.ext import tasks
 
 class ClawSporeClient(discord.Client):
     def __init__(self, *args, **kwargs):
@@ -7,6 +9,13 @@ class ClawSporeClient(discord.Client):
         self.log_channel_name = os.getenv('DISCORD_LOG_CHANNEL_NAME', 'log')
         self.log_channel = None
         self.processing_messages = set() # 重複処理防止用
+        
+        # 無反応時間監視用
+        self.last_activity_time = datetime.datetime.now(datetime.timezone.utc)
+        self.last_channel_id = None
+        
+        # バックグラウンドタスクの開始
+        self.check_inactivity.start()
 
     async def on_ready(self):
         print(f'Logged on as {self.user}!')
@@ -20,6 +29,41 @@ class ClawSporeClient(discord.Client):
             print(f'Startup message sent to #{self.log_channel_name} (ID: {self.log_channel.id})')
         
         print('--- ClawSpore Discord Interface is Ready ---')
+
+    @tasks.loop(minutes=60)
+    async def check_inactivity(self):
+        """定期的に無反応時間をチェックし、必要に応じて話題を振る"""
+        if not self.last_channel_id:
+            return
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        elapsed = now - self.last_activity_time
+        
+        # しきい値（デフォルト12時間）
+        threshold_hours = float(os.getenv('DISCORD_INACTIVITY_THRESHOLD_HOURS', '12'))
+        threshold = datetime.timedelta(hours=threshold_hours)
+        
+        if elapsed > threshold:
+            print(f"DEBUG: Inactivity detected ({elapsed.total_seconds() / 3600:.1f} hours). Generating topic...")
+            try:
+                channel = self.get_channel(self.last_channel_id) or await self.fetch_channel(self.last_channel_id)
+                if channel:
+                    from core.agent import agent
+                    session_id = str(channel.id)
+                    
+                    async with channel.typing():
+                        topic = await agent.generate_topic(session_id)
+                        await channel.send(f"💡 **ClawSpore Insights**\n{topic}")
+                    
+                    # 連続投稿を防ぐため、時刻を現在に更新
+                    self.last_activity_time = now
+                    print(f"DEBUG: Proactive topic sent to channel {channel.id}")
+            except Exception as e:
+                print(f"DEBUG: Error in check_inactivity task: {e}")
+
+    @check_inactivity.before_loop
+    async def before_check_inactivity(self):
+        await self.wait_until_ready()
 
     async def _prepare_log_channel(self):
         """全てのサーバーでログチャンネルを確認し、どこにもなければ作成する"""
@@ -63,6 +107,10 @@ class ClawSporeClient(discord.Client):
         if message.author == self.user:
             return
 
+        # アクティビティ情報の更新
+        self.last_activity_time = datetime.datetime.now(datetime.timezone.utc)
+        self.last_channel_id = message.channel.id
+
         try:
             # 重複排除ガード: 既に処理中のメッセージIDなら無視
             if message.id in self.processing_messages:
@@ -91,6 +139,7 @@ class ClawSporeClient(discord.Client):
             is_summarize = message.content.startswith('!summarize')
             is_clear = message.content.startswith('!clear')
             is_clear_all = message.content.startswith('!clear_all')
+            is_check_memory = message.content.startswith('!check_memory')
             is_help = message.content.startswith('!help')
             
             # MCP サーバー追加 (!add_mcp)
@@ -181,6 +230,7 @@ class ClawSporeClient(discord.Client):
 - `!create_tool [ファイル名.py]` : 新しい Python ツールを作成・登録します（改行後にコードを記述）。
 - `!remove_tool [ファイル名]` : 動的に追加したツールを削除します。
 - `!summarize` : 現在の会話（短期記憶）を要約して長期記憶に保存します。
+- `!check_memory [mode]` : 記憶を表示します（mode: short=履歴, long=サマリー, search=検索）。
 - `!clear` : 現在のチャンネルの短期記憶のみをクリアします（長期記憶は維持）。
 - `!clear_all` : 短期記憶と長期記憶の両方を完全にリセットします。
 - `!hello` : Bot の生存確認（挨拶）を行います。
@@ -238,6 +288,28 @@ class ClawSporeClient(discord.Client):
                 session_id = str(message.channel.id)
                 memory.clear_all(session_id)
                 await message.channel.send('💥 このチャンネルの短期記憶および長期記憶をすべて完全にリセットしました。')
+                return
+
+            # 記憶確認 (!check_memory)
+            if is_check_memory:
+                from core.tools.dynamic.check_memory import CheckMemoryTool
+                content = message.content[13:].strip()
+                parts = content.split()
+                mode = parts[0] if parts else "short"
+                query = " ".join(parts[1:]) if len(parts) > 1 else None
+                
+                async with message.channel.typing():
+                    tool = CheckMemoryTool()
+                    session_id = str(message.channel.id)
+                    result = await tool.execute(mode=mode, query=query, session_id=session_id)
+                    
+                    # 2000文字制限の処理
+                    if len(result) > 2000:
+                        chunks = [result[i:i+1900] for i in range(0, len(result), 1900)]
+                        for chunk in chunks:
+                            await message.channel.send(f"```\n{chunk}\n```")
+                    else:
+                        await message.channel.send(f"```\n{result}\n```")
                 return
 
             # 要約生成 (!summarize)
