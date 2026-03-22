@@ -9,7 +9,8 @@
 ## システムアーキテクチャ
 思考を司る **Core**、外部操作を担う **MCP/CLI**、そして人間との窓口となる **Discord** の3層構造で構築します。
 
-- **Core (Brain)**: 自律判断を担当。ローカル LLM 環境である **LM Studio** をバックエンドに利用します。Python で実装。
+- **Core (Brain)**: 自律判断を担当。ローカル LLM 環境である **LM Studio** を主要な推論エンジンとして利用します。Python で実装。
+- **ToolRouter (Routing)**: 推論エンジンを用いて、大量のツールの中から現在の文脈に最適なものを事前に選別。モデルの混乱を防ぎ、精度と速度を両立させます。
 - **MCP/CLI (Limbs)**: 外部操作を担う「手足」。Model Context Protocol (MCP) を通じてツールを実行します。
 - **Discord (Interface)**: 人間とのインタラクション。進捗報告や承認、相談を行います。
 
@@ -80,13 +81,17 @@ Bot が起動すると、Discord を通じて AI と対話できます。
 指定したログ用チャンネル（デフォルト: `#log`）に、起動通知やシステムログが送信されます。
 
 ## プロジェクト構成 (Structure)
+主要なプロンプトは [prompts/](file:///Volumes/SSD/work/ClawSpore/prompts/README.md) にまとめられています。
+
 ```text
 .
 ├── core/          # 自律判断・ロジック層 (思考)
-│   ├── llm_client.py # LM Studio 連携クライアント
+│   ├── llm_client.py # 各種 LLM へ接続クライアント
+│   ├── router.py     # ツール選別 (ToolRouter) 実装
 │   └── main.py       # エントリーポイント
 ├── interface/     # 外部インターフェース層
 │   └── discord_client.py # Discord Bot 実装
+├── prompts/       # プロンプト定義集
 ├── scripts/       # メンテナンス・テスト用スクリプト
 ├── Dockerfile     # コンテナ定義
 ├── compose.yaml   # サービス定義
@@ -108,6 +113,7 @@ Bot が起動すると、Discord を通じて AI と対話できます。
 - [x] ACL の Discord 上からの動的設定機能の実装（`grant_tool`, `revoke_tool` 完了）
 - [x] マルチモーダル対応（画像解析・リサイズ処理実装済み）
 - [x] 外部 API 連携ツールのプリセット拡充（メンテナンス、画像解説ツール追加）
+- [x] **ToolRouter によるツールの動的選別とフィルタリングの実装**
 
 ## ライセンス
 
