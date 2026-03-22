@@ -21,30 +21,53 @@ class VisionAnalyzeTool(BaseTool):
                     'type': 'string',
                     'description': '解析する画像のURL'
                 },
+                'file_path': {
+                    'type': 'string',
+                    'description': '解析するローカルファイルのパス (例: image.png)'
+                },
                 'prompt': {
                     'type': 'string',
                     'description': '画像についての具体的な質問や指示（例：「何が写っていますか？」「文字を読み取ってください」）'
                 }
-            },
-            'required': ['image_url']
+            }
         }
 
-    async def execute(self, image_url: str = None, prompt: str = "この画像の内容を詳しく説明してください。", **kwargs) -> Any:
+    async def execute(self, image_url: str = None, file_path: str = None, prompt: str = "Please describe the content of this image in detail.", **kwargs) -> Any:
         # 引数名の揺れ（url ではなく image_url）に対応
         if not image_url:
             image_url = kwargs.get('url')
         
-        if not image_url:
-            return "Error: image_url が指定されていません。"
+        image_data = None
+        mime_type = "image/png"
 
         try:
-            # 画像のダウンロード
-            response = requests.get(image_url, timeout=10)
-            if response.status_code != 200:
-                return f"Error: 画像の取得に失敗しました (Status: {response.status_code})"
+            if file_path:
+                # ローカルファイルの読み込み
+                import os
+                if not os.path.exists(file_path):
+                    return f"Error: ファイルが見つかりません: {file_path}"
+                
+                with open(file_path, "rb") as f:
+                    image_data = f.read()
+                
+                # MIMEタイプの推測
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext in ['.jpg', '.jpeg']: mime_type = "image/jpeg"
+                elif ext == '.webp': mime_type = "image/webp"
+                elif ext == '.gif': mime_type = "image/gif"
+                else: mime_type = "image/png"
             
-            image_data = response.content
-            mime_type = response.headers.get("Content-Type", "image/png")
+            elif image_url:
+                # 画像のダウンロード
+                response = requests.get(image_url, timeout=10)
+                if response.status_code != 200:
+                    return f"Error: 画像の取得に失敗しました (Status: {response.status_code})"
+                
+                image_data = response.content
+                mime_type = response.headers.get("Content-Type", "image/png")
+            
+            if not image_data:
+                return "Error: image_url または file_path が指定されていません。"
             
             # 画像のリサイズ処理 (Pillowを使用)
             try:
