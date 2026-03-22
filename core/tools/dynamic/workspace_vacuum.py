@@ -42,7 +42,8 @@ class WorkspaceVacuumTool(BaseTool):
         return True
 
     async def execute(self, dry_run: bool = False, older_than_days: int = 0, **kwargs) -> str:
-        target_dir = "workspaces/sessions"
+        # 短期記憶セッションの保存先をターゲットにする
+        target_dir = "core/data/sessions"
         if not os.path.exists(target_dir):
             return f"❌ ターゲットディレクトリ `{target_dir}` が存在しません。"
 
