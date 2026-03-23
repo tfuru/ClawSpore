@@ -276,32 +276,19 @@ class ClawSporeClient(discord.Client):
             if is_remove_tool:
                 filename = message.content[13:].strip()
                 if not filename:
-                    await message.channel.send('削除するツールのファイル名を入力してください。 (例: !remove_tool get_server_time)')
+                    await message.channel.send('削除するツールの名前またはファイル名を入力してください。 (例: !remove_tool check_command)')
                     return
-                
-                if filename.endswith('.py'):
-                    filename = filename[:-3]
                 
                 async with message.channel.typing():
                     try:
-                        import os
-                        dynamic_dir = os.path.join('core', 'tools', 'dynamic')
-                        file_path = os.path.join(dynamic_dir, f"{filename}.py")
+                        from core.tools.meta_tools import RemoveToolTool
+                        tool = RemoveToolTool()
+                        result = await tool.execute(tool_filename=filename)
                         
-                        if not os.path.exists(file_path):
-                            await message.channel.send(f'❌ ツールファイル `{filename}.py` が見つかりません。')
-                            return
-                        
-                        # 物理削除
-                        os.remove(file_path)
-                        
-                        # レジストリからの登録解除
-                        from core.tools.registry import tool_registry
-                        tool_registry.unregister_tool(filename)
-                        # 他のクラスが混ざっている可能性を考慮してリロードも実行
-                        tool_registry.load_dynamic_tools()
-                        
-                        await message.channel.send(f'✅ ツール `{filename}` を削除しました。')
+                        if result.startswith("Successfully"):
+                            await message.channel.send(f"✅ {result}")
+                        else:
+                            await message.channel.send(f"❌ {result}")
                     except Exception as e:
                         await message.channel.send(f"ツールの削除中にエラーが発生しました: {e}")
                 return

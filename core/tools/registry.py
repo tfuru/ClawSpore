@@ -1,6 +1,7 @@
 from typing import Dict, List, Any
 from core.tools.base import BaseTool
 import importlib
+import importlib.util
 import pkgutil
 import os
 import inspect
@@ -26,6 +27,12 @@ class ToolRegistry:
         if name in self._tools:
             del self._tools[name]
             print(f"ToolRegistry: Unregistered tool '{name}'")
+
+    def unregister_tools_by_module(self, module_name: str):
+        """指定されたモジュール名に紐づくすべてのツールを登録解除する"""
+        to_remove = [name for name, tool in self._tools.items() if tool.__class__.__module__ == module_name]
+        for name in to_remove:
+            self.unregister_tool(name)
 
     def get_tool_definitions(self) -> List[Dict[str, Any]]:
         """全てのツールの定義をリスト形式で取得 (LLM 用)"""
@@ -101,19 +108,29 @@ class ToolRegistry:
                 
                 module_name = f"{package_path}.{name}"
                 try:
-                    if module_name in os.sys.modules:
-                        module = importlib.reload(os.sys.modules[module_name])
+                    # ロード前に、このモジュールに属する既存のツールを一旦解除する
+                    self.unregister_tools_by_module(module_name)
+
+                    # ファイルから直接読み込むことでキャッシュ問題を回避する
+                    file_path = os.path.join(package.__path__[0], f"{name}.py")
+                    
+                    spec = importlib.util.spec_from_file_location(module_name, file_path)
+                    if spec and spec.loader:
+                        module = importlib.util.module_from_spec(spec)
+                        # sys.modules に登録（これがないと inspect 等が正しく動作しない場合がある）
+                        os.sys.modules[module_name] = module
+                        spec.loader.exec_module(module)
+                        
+                        found_classes = 0
+                        for member_name, obj in inspect.getmembers(module):
+                            if inspect.isclass(obj) and issubclass(obj, BaseTool) and obj is not BaseTool:
+                                instance = obj()
+                                self.register_tool(instance)
+                                found_classes += 1
+                        
+                        results["details"][name] = f"Loaded {found_classes} tools"
                     else:
-                        module = importlib.import_module(module_name)
-                    
-                    found_classes = 0
-                    for member_name, obj in inspect.getmembers(module):
-                        if inspect.isclass(obj) and issubclass(obj, BaseTool) and obj is not BaseTool:
-                            instance = obj()
-                            self.register_tool(instance)
-                            found_classes += 1
-                    
-                    results["details"][name] = f"Loaded {found_classes} tools"
+                        results["details"][name] = "Error: Could not create module spec"
                 except Exception as module_error:
                     error_msg = str(module_error)
                     print(f"ToolRegistry Error: Failed to load module '{name}': {error_msg}")

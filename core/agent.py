@@ -463,8 +463,8 @@ IMPORTANT:
                                     continue # 次のツールコールへ
 
                     
-                    # 進捗通知を抑制 (ユーザーの要望)
-                    # await send_callback(f"🛠️ 実行中: `{tool_name}(...)`")
+                    # 進捗通知を抑制 (ユーザーの要望) だったが、ツール名を表示するように変更
+                    await send_callback(f"🛠️ **Tool: `{tool_name}`**")
                     print(f"DEBUG: Calling tool '{tool_name}' with args {args}")
                     if log_callback:
                         await log_callback(f"🔹 RUN: {tool_name}\nARGS: {json.dumps(args, ensure_ascii=False)}")
@@ -478,6 +478,10 @@ IMPORTANT:
                             discord_log_callback=log_callback,
                             **args
                         )
+                        # ツール実行結果の送信
+                        if tool_result:
+                            await send_callback(f"✅ **Result: `{tool_name}`**\n```\n{str(tool_result)[:1900]}\n```")
+                        
                         print(f"DEBUG: Tool '{tool_name}' returned: {tool_result}")
                     except Exception as e:
                         error_trace = traceback.format_exc()

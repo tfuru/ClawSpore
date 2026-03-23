@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Any
 from core.tools.base import BaseTool
 from core.tools.registry import tool_registry
@@ -16,10 +17,15 @@ class CreateToolTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "システムに新しいツール（Pythonスクリプト）を動的に作成し、追加登録します。\n"
-            "【重要】Pythonの構文（特に括弧の対応、インデント）に細心の注意を払ってください。\n"
-            "JSON形式と混同して、Pythonコード内のブロックの終わりに '}' を置かないように注意してください。\n"
-            "現在のツールで解決できない問題がある場合、このツールを使って専用のコードを書き、新しいツールとして組み込みます。"
+            "システムに新しいツール（Pythonスクリプト）を動的に作成、または既存のツールを上書き更新します。\n"
+            "以下の実装ルールを厳守してください：\n"
+            "1. 'from core.tools.base import BaseTool' をインポートしてください（自動補完機能もあります）。\n"
+            "2. 'BaseTool' を継承したクラスを定義してください。\n"
+            "3. 必須プロパティ: 'name' (str), 'description' (str), 'parameters' (dict) を実装してください。\n"
+            "   - 'name' は必ずスペースなしの小文字（例: 'my_new_tool'）にしてください。\n"
+            "4. 必須メソッド: 'async def execute(self, **kwargs) -> Any' を実装し、必ず **kwargs を受け取るようにしてください。\n"
+            "5. Pythonの構文（特に括弧の対応、インデント）に細心の注意を払ってください。\n"
+            "既存のツールを更新する場合は、new_tool_name にそのツールのファイル名を指定して実行してください。"
         )
 
     @property
@@ -29,11 +35,11 @@ class CreateToolTool(BaseTool):
             "properties": {
                 "new_tool_name": {
                     "type": "string",
-                    "description": "作成するツールのファイル名（拡張子なし）。例: 'web_search_tool'"
+                    "description": "作成または更新するツールのファイル名（拡張子なし）。既存のツールを更新する場合は、InspectTool等で確認した正確な名前を指定してください。"
                 },
                 "content": {
                     "type": "string",
-                    "description": "ツールのPythonコード全体。BaseToolを継承したクラスを定義し、正しいPython構文で記述してください。"
+                    "description": "ツールのPythonコード全体。'from core.tools.base import BaseTool' を含み、BaseToolを継承したクラスを定義してください。name, description, parameters プロパティと execute(self, **kwargs) メソッドが必須です。"
                 }
             },
             "required": ["new_tool_name", "content"]
@@ -48,6 +54,126 @@ class CreateToolTool(BaseTool):
 
     async def execute(self, new_tool_name: str, content: str, **kwargs) -> Any:
         try:
+            # --- 0. 自動修正ロジック ---
+            # クラス定義を探す (class Name または class Name(Parent))
+            class_match = re.search(r"^class\s+([a-zA-Z0-9_]+)(\(([^)]*)\))?\s*:", content, re.MULTILINE)
+            if class_match:
+                class_name = class_match.group(1)
+                parents = class_match.group(3) or ""
+                
+                # BaseTool が継承リストにない場合、追加
+                if "BaseTool" not in parents:
+                    if parents:
+                        new_parents = f"BaseTool, {parents}"
+                    else:
+                        new_parents = "BaseTool"
+                    
+                    # クラス定義行を置換
+                    old_class_def = class_match.group(0)
+                    new_class_def = f"class {class_name}({new_parents}):"
+                    content = content.replace(old_class_def, new_class_def)
+            
+            # BaseTool の import がない場合、先頭に追加
+            if "from core.tools.base import BaseTool" not in content:
+                content = "from core.tools.base import BaseTool\n" + content
+
+            # --- 0.5. 抽象メソッドの自動補完 ---
+            # クラスの内容を解析して不足しているプロパティ/メソッドを補完
+            if class_match:
+                class_body = content[class_match.end():]
+                
+                # 1. name プロパティ (クラス変数としての定義もチェック、および snake_case 強制)
+                has_name_prop = "@property\n    def name" in class_body or "def name(self)" in class_body
+                if has_name_prop:
+                    # 既存の name プロパティの戻り値を snake_case に強制
+                    def normalize_name(match):
+                        name_val = match.group(1).strip("'\"")
+                        # スペースをアンダースコアに変換し、小文字化
+                        snake_val = re.sub(r'\s+', '_', name_val).lower()
+                        return f"return \"{snake_val}\""
+                    
+                    content = re.sub(r"return\s+(['\"].*?['\"])", normalize_name, content, count=1)
+                else:
+                    # クラス変数としての定義 (name = "...") を探す
+                    var_match = re.search(r"^\s+name\s*=\s*(['\"].*?['\"])", class_body, re.MULTILINE)
+                    if var_match:
+                        val = var_match.group(1).strip("'\"")
+                        snake_val = re.sub(r'\s+', '_', val).lower()
+                        content = content.replace(var_match.group(0), f"\n    @property\n    def name(self) -> str:\n        return \"{snake_val}\"")
+                    else:
+                        snake_name = re.sub(r'(?<!^)(?=[A-Z])', '_', class_name).lower().replace("_tool", "")
+                        insertion = f"\n    @property\n    def name(self) -> str:\n        return \"{snake_name}\"\n"
+                        content = re.sub(r"(class\s+" + class_name + r"(?:\([^)]*\))?\s*:)", r"\1" + insertion, content)
+
+                # 2. description プロパティ
+                has_desc_prop = "@property\n    def description" in content or "def description(self)" in content
+                if not has_desc_prop:
+                    var_match = re.search(r"^\s+description\s*=\s*(['\"].*?['\"])", content, re.MULTILINE)
+                    if var_match:
+                        val = var_match.group(1)
+                        content = content.replace(var_match.group(0), f"\n    @property\n    def description(self) -> str:\n        return {val}")
+                    else:
+                        insertion = f"\n    @property\n    def description(self) -> str:\n        return \"Auto-generated tool for {class_name}\"\n"
+                        content = re.sub(r"(class\s+" + class_name + r"(?:\([^)]*\))?\s*:)", r"\1" + insertion, content)
+
+                # 3. parameters プロパティの補完
+                has_params_prop = "@property\n    def parameters" in content or "def parameters(self)" in content
+                if not has_params_prop:
+                    var_match = re.search(r"^\s+parameters\s*=\s*(\{.*?\})", content, re.DOTALL | re.MULTILINE)
+                    if var_match:
+                        val = var_match.group(1)
+                        content = content.replace(var_match.group(0), f"\n    @property\n    def parameters(self) -> dict:\n        return {val}")
+                    else:
+                        # run または execute の引数から推論
+                        target_method = "run" if "def run(self" in content else "execute"
+                        method_match = re.search(r"def " + target_method + r"\(self,?\s*([^)]*)\)", content)
+                        props = {}
+                        req = []
+                        if method_match:
+                            args = method_match.group(1)
+                            for arg in args.split(","):
+                                arg = arg.strip()
+                                if not arg or arg == "**kwargs": continue
+                                name_part = arg.split(":")[0].split("=")[0].strip()
+                                props[name_part] = {"type": "string", "description": f"Argument {name_part}"}
+                                if "=" not in arg: req.append(name_part)
+                        
+                        import json
+                        params_json = json.dumps({"type": "object", "properties": props, "required": req}, indent=8)
+                        insertion = f"\n    @property\n    def parameters(self) -> dict:\n        return {params_json.strip()}\n"
+                        content = re.sub(r"(class\s+" + class_name + r"(?:\([^)]*\))?\s*:)", r"\1" + insertion, content)
+
+                # 4. execute メソッドの補完 (run がある場合)
+                if "async def execute" not in content and "def execute(self)" not in content:
+                    if "def run(self" in content or "async def run(self" in content:
+                        is_async_run = "async def run(self" in content
+                        await_prefix = "await " if is_async_run else ""
+                        insertion = f"\n    async def execute(self, **kwargs) -> Any:\n        return {await_prefix}self.run(**kwargs)\n"
+                        content = re.sub(r"(class\s+" + class_name + r"(?:\([^)]*\))?\s*:)", r"\1" + insertion, content)
+
+                # 5. execute メソッドの引数に **kwargs を強制
+                if "def execute(self" in content:
+                    # execute が定義されているが **kwargs がない場合を修正
+                    # async や型ヒント、戻り値の型指定 (-> Type) に対応
+                    def_match = re.search(r"(async\s+)?def\s+execute\(self,?\s*([^)]*)\)(\s*->\s*[^:]+)?\s*:", content)
+                    if def_match:
+                        prefix = def_match.group(1) or ""
+                        args_content = def_match.group(2)
+                        return_type = def_match.group(3) or ""
+                        
+                        if "**kwargs" not in args_content:
+                            new_args = args_content.strip()
+                            if new_args and not new_args.endswith(","):
+                                new_args += ", **kwargs"
+                            elif not new_args:
+                                new_args = "**kwargs"
+                            else:
+                                new_args += " **kwargs"
+                            
+                            old_line = def_match.group(0)
+                            new_line = f"{prefix}def execute(self, {new_args}){return_type}:"
+                            content = content.replace(old_line, new_line)
+
             # --- 1. 構文チェック ---
             try:
                 compile(content, f"<dynamic_tool:{new_tool_name}>", "exec")
@@ -100,7 +226,7 @@ class CreateToolTool(BaseTool):
                     "The invalid file has been removed. Please correct the Python code (ensure you use a class) and try again."
                 )
             
-            return f"Successfully created and loaded dynamic tool: {new_tool_name}. You can now use the new tools from this file."
+            return f"Successfully created/updated dynamic tool: {new_tool_name}. You can now use the new tools from this file."
             
         except Exception as e:
             return f"Error creating new tool: {e}"
@@ -140,10 +266,24 @@ class RemoveToolTool(BaseTool):
     async def execute(self, tool_filename: str, **kwargs) -> Any:
         try:
             dynamic_dir = os.path.join(os.path.dirname(__file__), "dynamic")
-            file_path = os.path.join(dynamic_dir, f"{tool_filename}.py")
+            
+            # 1. tool_filename をツール名（name）として解釈し、モジュール名からファイル名を逆引きしてみる
+            actual_filename = tool_filename
+            tool = tool_registry.get_tool(tool_filename)
+            if tool:
+                module_name = tool.__class__.__module__
+                if module_name.startswith("core.tools.dynamic."):
+                    actual_filename = module_name.split(".")[-1]
+                    print(f"MetaTool: Resolved tool name '{tool_filename}' to file '{actual_filename}.py'")
+
+            file_path = os.path.join(dynamic_dir, f"{actual_filename}.py")
             
             if not os.path.exists(file_path):
-                return f"Error: Tool file {tool_filename}.py not found."
+                # もし解決後のパスで見つからない場合は、元々の名前でもう一度試す
+                file_path = os.path.join(dynamic_dir, f"{tool_filename}.py")
+                if not os.path.exists(file_path):
+                    return f"Error: Tool file for '{tool_filename}' not found (checked {actual_filename}.py and {tool_filename}.py)."
+                actual_filename = tool_filename
             
             # ファイルを削除
             os.remove(file_path)
@@ -159,22 +299,10 @@ class RemoveToolTool(BaseTool):
                     pass
 
             # 現在ロードされているツールの中から、このファイルに由来するものを抹消
-            # (ファイル名とツール名が一致している前提、または再ロードで反映)
-            # 一旦、登録されている全ツールをリフレッシュするために、
-            # 現在のツールセットから dynamic 系を一旦すべて消すのは難しいため、
-            # 再読み込みを行う
-            tool_registry.load_dynamic_tools("core.tools.dynamic")
+            module_name = f"core.tools.dynamic.{actual_filename}"
+            tool_registry.unregister_tools_by_module(module_name)
             
-            # 注意: 既存のクラス定義がメモリに残る可能性があるため、
-            # 本来は unregister_tool(name) を確実に呼ぶ必要があるが、
-            # load_dynamic_tools は「ファイルがあるものだけを登録」するため、
-            # 物理ファイルがない場合は上書きされない。
-            # そのため、現状の Registry の仕組み上は、手動で辞書から消す必要がある。
-            # ここではシンプルに「リロード」を促し、ユーザーには再起動を推奨する形にするか、
-            # あるいはツール名 = ファイル名と想定して削除を試みる。
-            tool_registry.unregister_tool(tool_filename) 
-            
-            return f"Successfully removed tool: {tool_filename}. The file has been deleted and the tool has been unregistered."
+            return f"Successfully removed tool from file: {actual_filename}.py. The tool has been unregistered."
             
         except Exception as e:
             return f"Error removing tool: {e}"
@@ -211,8 +339,10 @@ class InspectTool(BaseTool):
             return f"Error: Tool '{tool_name}' not found."
         
         source = tool_registry.get_tool_source(tool_name)
+        module = tool.__class__.__module__
         return (
             f"--- Tool Info: {tool_name} ---\n"
+            f"Module: {module}\n"
             f"Description: {tool.description}\n"
             f"Parameters: {tool.parameters}\n\n"
             f"--- Source Code ---\n{source}"
