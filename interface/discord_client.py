@@ -30,6 +30,8 @@ class ClawSporeClient(discord.Client):
         await self._prepare_log_channel()
         
         if self.log_channel:
+            # AutonomyManager にログチャンネルIDを通知
+            self.autonomy_manager.log_channel_id = self.log_channel.id
             await self.log_channel.send(f'🚀 **ClawSpore Core 起動完了**\nLogged on as `{self.user}`')
             print(f'Startup message sent to #{self.log_channel_name} (ID: {self.log_channel.id})')
         

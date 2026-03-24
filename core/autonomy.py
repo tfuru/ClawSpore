@@ -17,6 +17,7 @@ class AutonomyManager:
         # 状態管理
         self.last_activity_time = datetime.datetime.now(datetime.timezone.utc)
         self.last_channel_id = None
+        self.log_channel_id = None # ログ出力先チャンネルID
         
     def start(self):
         """バックグラウンドタスクの開始"""
@@ -60,7 +61,7 @@ class AutonomyManager:
         # メインループ開始まで待機が必要な場合はここで調整（現状は即時）
         pass
 
-    @tasks.loop(minutes=60)
+    @tasks.loop(hours=24)
     async def autonomous_patrol(self):
         """定期的にワークスペースやシステム状態を巡回し、自律的に提案を行う"""
         if not self.last_channel_id:
@@ -117,8 +118,11 @@ You are performing a scheduled background check. Analyze the current environment
             )
 
             if suggestion and "NOTHING_TO_REPORT" not in suggestion.upper():
-                await self.send_callback(suggestion, self.last_channel_id)
-                print("AutonomyManager: Autonomous Patrol sent a suggestion.")
+                # ログチャンネルがあればそちらに、なければ最後のアクティブチャンネルに送信
+                target_id = self.log_channel_id or self.last_channel_id
+                if target_id:
+                    await self.send_callback(suggestion, target_id)
+                    print(f"AutonomyManager: Autonomous Patrol sent a suggestion to {target_id}.")
             else:
                 print("AutonomyManager: Autonomous Patrol decided nothing to report.")
 
