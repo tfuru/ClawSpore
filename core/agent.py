@@ -397,7 +397,7 @@ IMPORTANT:
                                 await send_callback(f"⚠️ **[ハルシネーション検出]**\nリンク切れを検出しました。自己修正を試みます（リトライ {hallucination_count}/2）...")
                                 
                                 if log_callback:
-                                    await log_callback(text=f"⚠️ **[HALLUCINATION DETECTED]**\nDead links: {', '.join(dead_urls)}")
+                                    await log_callback(text=f"⚠️ **[HALLUCINATION DETECTED]**\nリンク切れを検出しました。自己修正を試みます（リトライ {hallucination_count}/2）")
 
                                 # 直前のアシスタントのメッセージに「無効」の印をつける
                                 if session_id in memory.sessions and memory.sessions[session_id]:
