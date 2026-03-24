@@ -116,6 +116,7 @@ IMPORTANT:
 
         max_turns = 10
         turn = 0
+        hallucination_count = 0
         
         while turn < max_turns:
             turn += 1
@@ -130,7 +131,7 @@ IMPORTANT:
             for m in all_messages:
                 new_m = m.copy()
                 if new_m["role"] == "assistant" and new_m.get("content") and not new_m.get("tool_calls"):
-                    bad_phrases = ["Permission denied", "access is restricted", "権限がありません", "実行できませんでした"]
+                    bad_phrases = ["Permission denied", "access is restricted", "権限がありません", "実行できませんでした", "不正なURLを含むため無効化"]
                     if any(p in new_m["content"] for p in bad_phrases):
                         # ツールを呼び出していないのに「失敗した」と言っている場合（ハルシネーション）のみ補正
                         new_m["content"] = "[このメッセージはシステムにより正常な状態に補正されました] 状況を再確認し、必要なツールを使用してタスクを遂行します。"
@@ -388,20 +389,37 @@ IMPORTANT:
                                 dead_urls.append(url)
                         
                         if dead_urls:
-                            print(f"DEBUG: Found {len(dead_urls)} dead URLs. Triggering self-correction.")
-                            # Discord のメインチャットにも通知を送信
-                            await send_callback(f"⚠️ **[ハルシネーション（リンク切れ）を検出しました]**\n以下のURLが解決できませんでした: {', '.join(dead_urls)}\n自己修正（リトライ）を開始します...")
+                            hallucination_count += 1
+                            print(f"DEBUG: Found {len(dead_urls)} dead URLs. Count: {hallucination_count}")
                             
-                            if log_callback:
-                                await log_callback(text=f"⚠️ **[HALLUCINATION DETECTED]**\nDead links: {', '.join(dead_urls)}")
+                            if hallucination_count < 3:
+                                # 回数制限内ならリトライ
+                                await send_callback(f"⚠️ **[ハルシネーション検出]**\nリンク切れを検出しました。自己修正を試みます（リトライ {hallucination_count}/2）...")
+                                
+                                if log_callback:
+                                    await log_callback(text=f"⚠️ **[HALLUCINATION DETECTED]**\nDead links: {', '.join(dead_urls)}")
 
-                            memory.add_message(
-                                session_id=session_id,
-                                role="system",
-                                content=f"### HALLUCINATION CHECK FAILED\nDead URL(s) detected: {', '.join(dead_urls)}. Please provide valid links or acknowledge if they are unavailable."
-                            )
-                            continue 
+                                # 直前のアシスタントのメッセージに「無効」の印をつける
+                                if session_id in memory.sessions and memory.sessions[session_id]:
+                                    for m in reversed(memory.sessions[session_id]):
+                                        if m["role"] == "assistant":
+                                            if not m.get("content", "").startswith("（不正なURLを含むため無効化）"):
+                                                m["content"] = f"（不正なURLを含むため無効化）\n{m.get('content', '')}"
+                                            break
 
+                                memory.add_message(
+                                    session_id=session_id,
+                                    role="system",
+                                    content=f"### HALLUCINATION CHECK FAILED\n以下のURLは存在しませんでした: {', '.join(dead_urls)}\n不正なURLを削除または修正して、正しい情報のみを回答してください。実在しないURLを捏造してはいけません。"
+                                )
+                                continue 
+                            else:
+                                # 3回以上失敗した場合は、リンクを削除して強制終了（無限ループ回避）
+                                await send_callback("⚠️ **[リンク修正を断念]**\n正しいURLを特定できなかったため、リンクを削除して回答を構成します。")
+                                for dead_url in dead_urls:
+                                    filtered_content = filtered_content.replace(dead_url, "[無効なリンクを削除しました]")
+                    
+                    # 正常時、または修正限界後の送信
                     await send_callback(filtered_content)
                 else:
                     await send_callback("...（処理を継続しています）")
