@@ -92,3 +92,17 @@ async def is_url_reachable(url: str) -> bool:
     except Exception as e:
         print(f"DEBUG: URL check failed for {url}: {e}")
         return False
+
+def install_package(package_name: str) -> bool:
+    """
+    指定された Python パッケージを pip でインストールする。
+    """
+    import subprocess
+    import sys
+    try:
+        print(f"Utils: Installing package '{package_name}'...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+        return True
+    except Exception as e:
+        print(f"Utils: Error installing package {package_name}: {e}")
+        return False

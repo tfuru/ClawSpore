@@ -60,6 +60,46 @@ class CreateToolTool(BaseTool):
             content = re.sub(r'\n?```$', '', content, flags=re.MULTILINE)
             content = content.strip()
             
+            # --- 0.1. 依存関係の自動インストール ---
+            import sys
+            import importlib.util
+            from core.utils import install_package
+
+            # インポート文を抽出 (import package, from package import ...)
+            # 簡易的な正規表現による抽出
+            imports = re.findall(r"^\s*(?:import|from)\s+([a-zA-Z0-9_]+)", content, re.MULTILINE)
+            
+            # 標準ライブラリや既にロード済みのものを除外リスト（不完全だが一般的なもの）
+            std_libs = {"os", "sys", "re", "json", "datetime", "asyncio", "typing", "collections", "math", "time", "random", "base64", "abc"}
+            # プロジェクト内部モジュール
+            internal_libs = {"core", "limbs", "interface", "web"}
+            
+            seen_imports = set()
+            for pkg in set(imports):
+                if pkg in std_libs or pkg in internal_libs or pkg in seen_imports:
+                    continue
+                seen_imports.add(pkg)
+                
+                # モジュールが利用可能かチェック
+                if importlib.util.find_spec(pkg) is None:
+                    print(f"MetaTool: Module '{pkg}' not found. Attempting auto-installation...")
+                    
+                    # 特殊なマッピング (モジュール名 -> パッケージ名)
+                    pkg_map = {
+                        "bs4": "beautifulsoup4",
+                        "PIL": "Pillow",
+                        "sklearn": "scikit-learn",
+                        "cv2": "opencv-python",
+                        "yaml": "PyYAML"
+                    }
+                    install_name = pkg_map.get(pkg, pkg)
+                    
+                    # インストール実行
+                    if not install_package(install_name):
+                        print(f"MetaTool: Warning: Failed to install '{install_name}'")
+                    else:
+                        print(f"MetaTool: Successfully installed '{install_name}'")
+
             # LLMが時折末尾に付けてしまう JSON 的な閉じ括弧 '}' を除去
             if content.endswith('}'):
                 # 前後のバランスを確認せず、Pythonファイルの末尾に単独の } があるのは異常なので除去
