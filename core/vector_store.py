@@ -31,11 +31,11 @@ class VectorStore:
         if not query:
             return []
             
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=n_results,
-            where={"session_id": session_id}
-        )
+        search_params = {"query_texts": [query], "n_results": n_results}
+        if session_id:
+            search_params["where"] = {"session_id": session_id}
+            
+        results = self.collection.query(**search_params)
         
         # 結果を整形
         hits = []

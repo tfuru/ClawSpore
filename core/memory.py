@@ -49,6 +49,7 @@ class Memory:
         self.long_term_memories: Dict[str, List[str]] = {}
         self.st_dir = st_dir
         self.lt_dir = lt_dir
+        self.episode_summaries: Dict[str, str] = {} # セッションごとの動的な要約
         
         for d in [self.st_dir, self.lt_dir]:
             if not os.path.exists(d):
@@ -131,6 +132,45 @@ class Memory:
         if not summaries:
             return ""
         return "\n---\n".join(summaries)
+
+    def get_episode_summary(self, session_id: str) -> str:
+        """現在のセッションの動的な要約を取得する"""
+        return self.episode_summaries.get(session_id, "まだ会話が始まったばかりです。")
+
+    async def update_episode_summary(self, session_id: str, last_user_msg: str, last_assistant_msg: str):
+        """現在のセッション要約をローカルLLMを使用して更新する"""
+        from core.llm_client import llm
+        
+        current_summary = self.get_episode_summary(session_id)
+        
+        prompt = f"""あなたは ClawSpore の記憶管理サブシステムです。
+現在のセッションの要約を、最新のやり取りを踏まえて更新してください。
+
+### 現在のセッション要約:
+{current_summary}
+
+### 直近のやり取り:
+ユーザー: {last_user_msg}
+アシスタント: {last_assistant_msg}
+
+### 指針:
+- 重要な事実、決定事項、ユーザーの好み、現在取り組んでいるタスクを箇条書きでまとめてください。
+- 重複する情報はまとめ、簡潔さを維持してください。
+- 出力は要約テキストのみ（日本語）としてください。"""
+
+        messages = [
+            {"role": "system", "content": "あなたは要約エキスパートです。"},
+            {"role": "user", "content": prompt}
+        ]
+        
+        try:
+            # ユーザーの要望に基づき、ローカル LLM (use_gemini=False) を使用
+            response = await llm.chat(messages, use_gemini=False)
+            if response.content:
+                self.episode_summaries[session_id] = response.content.strip()
+                print(f"Memory: Updated episode summary for '{session_id}'")
+        except Exception as e:
+            print(f"Memory: Error updating episode summary: {e}")
 
     def add_long_term_summary(self, session_id: str, summary: str):
         """長期記憶にサマリーを追加し保存する"""
@@ -219,12 +259,14 @@ class Memory:
             except Exception as e:
                 print(f"Memory: Error deleting LT file: {e}")
                 
-    def get_relevant_history(self, session_id: str, query: str, n_results: int = 5) -> str:
+    def get_relevant_history(self, session_id: str, query: str, n_results: int = 5, cross_session: bool = True) -> str:
         """現在のクエリに関連する過去の履歴をベクトルDBから取得する"""
         if not vector_store:
             return ""
         
-        hits = vector_store.search_similar(session_id, query, n_results=n_results)
+        # cross_session=True の場合、すべてのセッションから検索する
+        search_id = None if cross_session else session_id
+        hits = vector_store.search_similar(search_id, query, n_results=n_results)
         if not hits:
             return ""
             

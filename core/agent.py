@@ -139,8 +139,9 @@ IMPORTANT:
             system_msg = next((m for m in cleansed_all_messages if m["role"] == "system"), None)
             other_messages = [m for m in cleansed_all_messages if m["role"] != "system"]
             
-            # 直近 20 件を取得 (以前より少し多めに保持)
-            window_size = 20
+            # --- 1. Working Memory (Short-term) ---
+            # 直近 5 往復 (10 メッセージ) に制限してトピックの連続性を確保
+            window_size = 10
             recent_context = other_messages[-window_size:] if len(other_messages) > window_size else other_messages
             
             # ロールの交互性確保: 開始が 'user' になるまで調整
@@ -177,12 +178,25 @@ IMPORTANT:
                     tool_defs = None
                     print("Agent: No tools selected by router.")
 
-            # RAG (検索拡張生成) で関連する過去の情報を取得
+            # --- 2. Knowledge Memory (Long-term / RAG) ---
+            # 関連する過去の情報を取得
             rag_context = memory.get_relevant_history(session_id, prompt)
+            
+            # --- 3. Episode Memory (Mid-term / Session Summary) ---
+            # 現在のセッションの動的な要約を取得
+            episode_context = memory.get_episode_summary(session_id)
+
+            # プロンプトの組み立て
+            mem_instructions = []
+            if episode_context:
+                mem_instructions.append(f"### EPISODE MEMORY (今回のセッションの流れ)\n{episode_context}")
+            
             if rag_context:
-                # 関連する履歴がある場合、「あなたが思い出している記憶」として自然に挿入
-                rag_msg = {"role": "system", "content": f"### あなたが思い出した関連する過去の記憶（断片）\n以下の内容は過去のやり取りからあなたが思い出した断片的な記憶です。これらはあくまで参考とし、現在のユーザーの意図や最新の状況と矛盾がある場合は、常に「最新の指示と状況」を優先して対話してください：\n{rag_context}"}
-                messages = ([system_msg] if system_msg else []) + [rag_msg] + recent_context
+                mem_instructions.append(f"### KNOWLEDGE MEMORY (関連する過去の知識)\n{rag_context}")
+
+            if mem_instructions:
+                mem_msg = {"role": "system", "content": "\n\n".join(mem_instructions) + "\n\n**重要**: 上記の「知識」や「セッションの流れ」を背景情報として理解した上で、以下の「Working Memory (直近の会話)」に最も重点を置いて回答してください。"}
+                messages = ([system_msg] if system_msg else []) + [mem_msg] + recent_context
             else:
                 messages = ([system_msg] if system_msg else []) + recent_context
             
@@ -507,21 +521,25 @@ IMPORTANT:
                 print("DEBUG: All tools executed. Continuing to next turn.")
                 continue
             else:
-                # ツール呼び出しがなければ、特定条件で自動要約を実行
-                # 1. 明確な終了の挨拶が含まれている場合 (誤判定を防ぐため厳選)
-                # 2. メッセージ数がしきい値（例：30件）を超えた場合
-                closing_keywords = ["また今度", "また後で", "さようなら", "バイバイ", "ログアウト", "シャットダウン"]
-                msg_count = len(memory.get_messages(session_id))
+                # エピソード記憶（セッション要約）を更新
+                # 直近のユーザー発言とアシスタントの回答を取得
+                last_user = next((m.get("content") for m in reversed(all_messages) if m["role"] == "user"), "")
+                last_assistant = assistant_msg.get("content", "")
                 
-                # 直近のアシスタントの発言をチェック (ユーザーが終了を促した結果の応答を想定)
-                last_assistant_content = assistant_msg.get("content", "").lower()
-                is_closing = any(kw in last_assistant_content for kw in closing_keywords)
-                
-                # 会話の終了が検知された場合のみ自動要約を行う
-                if is_closing and msg_count >= 5:
-                    print(f"Agent: Triggering automatic summarization (is_closing={is_closing}, msg_count={msg_count})")
-                    await self.summarize_session(session_id, send_callback)
-                
+                if last_user and last_assistant:
+                    # 1. 毎ターンのエピソード記憶（セッション要約）更新
+                    await memory.update_episode_summary(session_id, last_user, last_assistant)
+                    
+                    # 2. 会話の終了が検知された場合のみ、長期記憶用の要約を行う
+                    closing_keywords = ["また今度", "また後で", "さようなら", "バイバイ", "ログアウト", "シャットダウン"]
+                    msg_count = len(memory.get_messages(session_id))
+                    last_assistant_content = last_assistant.lower()
+                    is_closing = any(kw in last_assistant_content for kw in closing_keywords)
+                    
+                    if is_closing and msg_count >= 5:
+                        print(f"Agent: Triggering long-term summarization for session end.")
+                        await self.summarize_session(session_id, send_callback)
+
                 return None
 
     async def summarize_session(self, session_id: str, send_callback):
