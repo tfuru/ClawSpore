@@ -13,7 +13,7 @@ class CheckMemoryTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Retrieve and display recorded memories for the current session. Modes: 'short' (latest chat history), 'long' (past summaries), or 'search' (find relevant past events using a query)."
+        return "Retrieve and display recorded memories for the current session. Modes: 'short' (latest chat history), 'long' (past summaries), 'episode' (current session summary), or 'search' (find relevant past events using a query)."
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -22,7 +22,7 @@ class CheckMemoryTool(BaseTool):
             "properties": {
                 "mode": {
                     "type": "string",
-                    "enum": ["short", "long", "search"],
+                    "enum": ["short", "long", "search", "episode"],
                     "description": "Memory retrieval mode."
                 },
                 "query": {
@@ -70,6 +70,10 @@ class CheckMemoryTool(BaseTool):
             output = [f"--- Long-term Memory (Last {len(recent_summaries)} summaries) ---"]
             output.extend(recent_summaries)
             return "\n".join(output)
+
+        elif mode == "episode":
+            summary = memory.get_episode_summary(session_id)
+            return f"--- Episode Memory (Current Session Summary) ---\n{summary}"
 
         elif mode == "search":
             if not query:
