@@ -63,7 +63,7 @@ class CreateToolTool(BaseTool):
             # --- 0.1. 依存関係の自動インストール ---
             import sys
             import importlib.util
-            from core.utils import install_package
+            from core.utils import install_package, PACKAGE_MAPPING
 
             # インポート文を抽出 (import package, from package import ...)
             # 簡易的な正規表現による抽出
@@ -84,15 +84,8 @@ class CreateToolTool(BaseTool):
                 if importlib.util.find_spec(pkg) is None:
                     print(f"MetaTool: Module '{pkg}' not found. Attempting auto-installation...")
                     
-                    # 特殊なマッピング (モジュール名 -> パッケージ名)
-                    pkg_map = {
-                        "bs4": "beautifulsoup4",
-                        "PIL": "Pillow",
-                        "sklearn": "scikit-learn",
-                        "cv2": "opencv-python",
-                        "yaml": "PyYAML"
-                    }
-                    install_name = pkg_map.get(pkg, pkg)
+                    # 共通のマッピング (モジュール名 -> パッケージ名) を使用
+                    install_name = PACKAGE_MAPPING.get(pkg, pkg)
                     
                     # インストール実行
                     if not install_package(install_name):

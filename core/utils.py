@@ -106,3 +106,13 @@ def install_package(package_name: str) -> bool:
     except Exception as e:
         print(f"Utils: Error installing package {package_name}: {e}")
         return False
+
+# 共通パッケージ名マッピング (モジュール名 -> pip パッケージ名)
+PACKAGE_MAPPING = {
+    "bs4": "beautifulsoup4",
+    "PIL": "Pillow",
+    "sklearn": "scikit-learn",
+    "cv2": "opencv-python",
+    "yaml": "PyYAML",
+    "wikipedia": "wikipedia" # デフォルトと同じだが明示
+}

@@ -65,6 +65,26 @@ class ToolRegistry:
             # kwargs には session_id や discord_send_callback などが含まれる
             return await tool.execute(**kwargs)
         except Exception as e:
+            # --- ランタイム依存関係解決 ---
+            if isinstance(e, ModuleNotFoundError) or "No module named" in str(e):
+                import re
+                from core.utils import install_package, PACKAGE_MAPPING
+                
+                # エラーメッセージからモジュール名を抽出: "No module named 'xxx'"
+                match = re.search(r"No module named '([^']+)'", str(e))
+                if match:
+                    pkg = match.group(1)
+                    print(f"ToolRegistry: Runtime ModuleNotFoundError for '{pkg}'. Attempting auto-fix...")
+                    
+                    install_name = PACKAGE_MAPPING.get(pkg, pkg)
+                    if install_package(install_name):
+                        print(f"ToolRegistry: Successfully installed '{install_name}'. Retrying tool execution...")
+                        try:
+                            # 1回だけリトライ
+                            return await tool.execute(**kwargs)
+                        except Exception as retry_e:
+                            e = retry_e # エラー情報を更新して続行
+            
             import traceback
             tb = traceback.format_exc()
             print(f"DEBUG: Error executing tool '{name}': {e}")
