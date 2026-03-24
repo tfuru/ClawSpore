@@ -35,14 +35,14 @@ class CreateToolTool(BaseTool):
             "properties": {
                 "new_tool_name": {
                     "type": "string",
-                    "description": "作成または更新するツールのファイル名（拡張子なし）。既存のツールを更新する場合は、InspectTool等で確認した正確な名前を指定してください。"
+                    "description": "作成または更新するツールのファイル名（拡張子なし）。省略された場合は content 内のクラス名から自動推論されます。"
                 },
                 "content": {
                     "type": "string",
-                    "description": "ツールのPythonコード全体。'from core.tools.base import BaseTool' を含み、BaseToolを継承したクラスを定義してください。name, description, parameters プロパティと execute(self, **kwargs) メソッドが必須です。"
+                    "description": "ツールのPythonコード全体。'from core.tools.base import BaseTool' を含み、BaseToolを継承したクラスを定義してください。"
                 }
             },
-            "required": ["new_tool_name", "content"]
+            "required": ["content"]
         }
 
     def requires_approval(self) -> bool:
@@ -52,11 +52,31 @@ class CreateToolTool(BaseTool):
     def is_dangerous(self) -> bool:
         return True
 
-    async def execute(self, new_tool_name: str, content: str, **kwargs) -> Any:
+    async def execute(self, content: str, new_tool_name: str = None, **kwargs) -> Any:
         try:
-            # --- 0. 自動修正ロジック ---
+            # --- 0. 内容のクレンジング ---
+            # Markdown のコードブロックを除去
+            content = re.sub(r'^```python\n?', '', content, flags=re.MULTILINE)
+            content = re.sub(r'\n?```$', '', content, flags=re.MULTILINE)
+            content = content.strip()
+            
+            # LLMが時折末尾に付けてしまう JSON 的な閉じ括弧 '}' を除去
+            if content.endswith('}'):
+                # 前後のバランスを確認せず、Pythonファイルの末尾に単独の } があるのは異常なので除去
+                content = content[:-1].strip()
+
+            # --- 0.1. 自動修正ロジック ---
             # クラス定義を探す (class Name または class Name(Parent))
             class_match = re.search(r"^class\s+([a-zA-Z0-9_]+)(\(([^)]*)\))?\s*:", content, re.MULTILINE)
+            
+            # --- 0.2. ツール名の推論 (new_tool_name が未指定の場合) ---
+            if not new_tool_name:
+                if class_match:
+                    class_name = class_match.group(1)
+                    # クラス名からスネークケースを生成
+                    new_tool_name = re.sub(r'(?<!^)(?=[A-Z])', '_', class_name).lower().replace("_tool", "")
+                else:
+                    return "Error: content contains no class definition and new_tool_name was not provided."
             if class_match:
                 class_name = class_match.group(1)
                 parents = class_match.group(3) or ""
