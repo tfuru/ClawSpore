@@ -54,5 +54,39 @@ class MdTool(BaseTool):
     else:
         print("❌ Test Case 2 Failed.")
 
+    # テストケース3: execute が名プロパティより前にあり、return を含んでいる
+    content_mangled = """
+class MangledTool(BaseTool):
+    async def execute(self, **kwargs):
+        return "original_result"
+    
+    @property
+    def name(self):
+        return "Mangled Name"
+"""
+    print("\n--- Test Case 3: Method with return before name property ---")
+    result = await tool.execute(content=content_mangled, session_id="test_mangle")
+    print(f"Result: {result}")
+    
+    if "Successfully created" in result:
+        # ファイルの中身を確認
+        file_path = "core/tools/dynamic/mangled.py"
+        with open(file_path, "r") as f:
+            code = f.read()
+            # execute の中身が壊れていないか
+            has_original_result = 'return "original_result"' in code
+            # name プロパティが snake_case になっているか
+            has_snake_name = 'return "mangled_name"' in code
+            
+            if has_original_result and has_snake_name:
+                print("✅ Test Case 3 Passed! (No mangling of execute return)")
+                os.remove(file_path)
+            else:
+                print("❌ Test Case 3 Failed: code was mangled.")
+                print(f"--- Code start ---\n{code}\n--- Code end ---")
+                # Do NOT remove on failure for inspection
+    else:
+        print(f"❌ Test Case 3 Failed to create: {result}")
+
 if __name__ == "__main__":
     asyncio.run(test_robustness())

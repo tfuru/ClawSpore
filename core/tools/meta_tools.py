@@ -106,13 +106,18 @@ class CreateToolTool(BaseTool):
                 has_name_prop = "@property\n    def name" in class_body or "def name(self)" in class_body
                 if has_name_prop:
                     # 既存の name プロパティの戻り値を snake_case に強制
-                    def normalize_name(match):
-                        name_val = match.group(1).strip("'\"")
-                        # スペースをアンダースコアに変換し、小文字化
-                        snake_val = re.sub(r'\s+', '_', name_val).lower()
-                        return f"return \"{snake_val}\""
+                    def normalize_name_in_prop(property_match):
+                        prop_def = property_match.group(0)
+                        def normalize_inner(match):
+                            name_val = match.group(1).strip("'\"")
+                            snake_val = re.sub(r'\s+', '_', name_val).lower()
+                            return f"return \"{snake_val}\""
+                        # プロパティの定義ブロック内でのみ return を置換
+                        return re.sub(r"return\s+(['\"].*?['\"])", normalize_inner, prop_def, count=1)
                     
-                    content = re.sub(r"return\s+(['\"].*?['\"])", normalize_name, content, count=1)
+                    # @property から return までのブロックをターゲットにする
+                    pattern = r"(@property\s+def\s+name\(self\).*?return\s+['\"].*?['\"])"
+                    content = re.sub(pattern, normalize_name_in_prop, content, flags=re.DOTALL)
                 else:
                     # クラス変数としての定義 (name = "...") を探す
                     var_match = re.search(r"^\s+name\s*=\s*(['\"].*?['\"])", class_body, re.MULTILINE)
