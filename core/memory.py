@@ -239,11 +239,14 @@ class Memory:
     def clear(self, session_id: str):
         """短期記憶のみをクリアする（長期記憶は維持）"""
         self.sessions[session_id] = []
+        # エピソード記憶（セッション要約）もクリア
+        self.episode_summaries.pop(session_id, None)
+        
         path = self._get_st_path(session_id)
         if os.path.exists(path):
             try:
                 os.remove(path)
-                print(f"Memory: Deleted ST session file '{session_id}.json'")
+                print(f"Memory: Deleted ST session file '{session_id}.json' and episode summary.")
             except Exception as e:
                 print(f"Memory: Error deleting ST file: {e}")
 
