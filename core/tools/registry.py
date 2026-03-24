@@ -61,43 +61,55 @@ class ToolRegistry:
         if not tool:
             return f"Error: Tool '{name}' not found."
         
-        try:
-            # kwargs には session_id や discord_send_callback などが含まれる
-            return await tool.execute(**kwargs)
-        except Exception as e:
-            # --- ランタイム依存関係解決 ---
-            if isinstance(e, ModuleNotFoundError) or "No module named" in str(e):
-                import re
-                from core.utils import install_package, PACKAGE_MAPPING
+        async def try_execute_with_auto_fix():
+            import re
+            from core.utils import install_package, PACKAGE_MAPPING
+            
+            try:
+                # kwargs には session_id や discord_send_callback などが含まれる
+                result = await tool.execute(**kwargs)
                 
-                # エラーメッセージからモジュール名を抽出: "No module named 'xxx'"
-                match = re.search(r"No module named '([^']+)'", str(e))
-                if match:
-                    pkg = match.group(1)
-                    print(f"ToolRegistry: Runtime ModuleNotFoundError for '{pkg}'. Attempting auto-fix...")
-                    
-                    install_name = PACKAGE_MAPPING.get(pkg, pkg)
-                    if install_package(install_name):
-                        print(f"ToolRegistry: Successfully installed '{install_name}'. Retrying tool execution...")
-                        try:
-                            # 1回だけリトライ
-                            return await tool.execute(**kwargs)
-                        except Exception as retry_e:
-                            e = retry_e # エラー情報を更新して続行
-            
-            import traceback
-            tb = traceback.format_exc()
-            print(f"DEBUG: Error executing tool '{name}': {e}")
-            print(tb)
-            
-            # 自己修復のための詳細なフィードバック
-            source = self.get_tool_source(name)
-            return (
-                f"❌ Error executing tool '{name}': {e}\n\n"
-                f"--- Traceback ---\n{tb}\n"
-                f"--- Tool Source Code ({name}) ---\n{source}\n"
-                "Please analyze the error and source code, and fix the tool if necessary using 'create_tool'."
-            )
+                # ツールが例外をキャッチして文字列として返した場合のハンドリング
+                if isinstance(result, str) and ("No module named" in result or "ModuleNotFoundError" in result):
+                    match = re.search(r"No module named '([^']+)'", result)
+                    if match:
+                        pkg = match.group(1)
+                        print(f"ToolRegistry: Detected ModuleNotFoundError in return value for '{pkg}'. Attempting auto-fix...")
+                        install_name = PACKAGE_MAPPING.get(pkg, pkg)
+                        if install_package(install_name):
+                            print(f"ToolRegistry: Successfully installed '{install_name}'. Retrying...")
+                            return await tool.execute(**kwargs) # リトライ
+                return result
+                
+            except Exception as e:
+                # ランタイム例外（未キャッチ）のハンドリング
+                if isinstance(e, ModuleNotFoundError) or "No module named" in str(e):
+                    match = re.search(r"No module named '([^']+)'", str(e))
+                    if match:
+                        pkg = match.group(1)
+                        print(f"ToolRegistry: Runtime ModuleNotFoundError for '{pkg}'. Attempting auto-fix...")
+                        install_name = PACKAGE_MAPPING.get(pkg, pkg)
+                        if install_package(install_name):
+                            print(f"ToolRegistry: Successfully installed '{install_name}'. Retrying...")
+                            try:
+                                return await tool.execute(**kwargs)
+                            except Exception as retry_e:
+                                e = retry_e
+                
+                # 失敗時のトレースバック表示
+                import traceback
+                tb = traceback.format_exc()
+                print(f"DEBUG: Error executing tool '{name}': {e}")
+                print(tb)
+                source = self.get_tool_source(name)
+                return (
+                    f"❌ Error executing tool '{name}': {e}\n\n"
+                    f"--- Traceback ---\n{tb}\n"
+                    f"--- Tool Source Code ({name}) ---\n{source}\n"
+                    "Please analyze the error and source code, and fix the tool if necessary using 'create_tool'."
+                )
+
+        return await try_execute_with_auto_fix()
 
     def load_dynamic_tools(self, package_path: str = "core.tools.dynamic") -> Dict[str, Any]:
         """
