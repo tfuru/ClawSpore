@@ -389,6 +389,9 @@ IMPORTANT:
                         
                         if dead_urls:
                             print(f"DEBUG: Found {len(dead_urls)} dead URLs. Triggering self-correction.")
+                            # Discord のメインチャットにも通知を送信
+                            await send_callback(f"⚠️ **[ハルシネーション（リンク切れ）を検出しました]**\n以下のURLが解決できませんでした: {', '.join(dead_urls)}\n自己修正（リトライ）を開始します...")
+                            
                             if log_callback:
                                 await log_callback(text=f"⚠️ **[HALLUCINATION DETECTED]**\nDead links: {', '.join(dead_urls)}")
 
