@@ -50,11 +50,39 @@ class Memory:
         self.st_dir = st_dir
         self.lt_dir = lt_dir
         self.episode_summaries: Dict[str, str] = {} # セッションごとの動的な要約
+        self.session_settings: Dict[str, Dict[str, Any]] = {} # セッションごとの各種設定 (キャラクターなど)
+        self.settings_path = os.path.join(self.st_dir, "session_settings.json")
+        self._load_settings()
         
         for d in [self.st_dir, self.lt_dir]:
             if not os.path.exists(d):
                 os.makedirs(d, exist_ok=True)
         
+    def _load_settings(self):
+        if os.path.exists(self.settings_path):
+            try:
+                with open(self.settings_path, "r", encoding="utf-8") as f:
+                    self.session_settings = json.load(f)
+                    print("Memory: Loaded session settings.")
+            except Exception as e:
+                print(f"Memory: Error loading settings: {e}")
+
+    def _save_settings(self):
+        try:
+            with open(self.settings_path, "w", encoding="utf-8") as f:
+                json.dump(self.session_settings, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Memory: Error saving settings: {e}")
+
+    def get_character_setting(self, session_id: str) -> Dict[str, Any]:
+        return self.session_settings.get(session_id, {}).get("character")
+
+    def set_character_setting(self, session_id: str, character_data: Dict[str, Any]):
+        if session_id not in self.session_settings:
+            self.session_settings[session_id] = {}
+        self.session_settings[session_id]["character"] = character_data
+        self._save_settings()
+
     def _get_st_path(self, session_id: str) -> str:
         return os.path.join(self.st_dir, f"{session_id}.json")
 
