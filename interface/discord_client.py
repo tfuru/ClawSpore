@@ -168,7 +168,52 @@ class ClawSporeClient(discord.Client):
             is_check_memory = message.content.startswith('!check_memory')
             is_patrol = message.content.startswith('!patrol')
             is_help = message.content.startswith('!help')
+            is_character = message.content.startswith('!character')
             
+            # キャラクター設定 (!character)
+            if is_character:
+                import json
+                from core.memory import memory
+                session_id = str(message.channel.id)
+                profiles_path = "core/data/character_profiles.json"
+                
+                # プロファイルの読み込み
+                profiles = {}
+                if os.path.exists(profiles_path):
+                    with open(profiles_path, "r", encoding="utf-8") as f:
+                        profiles = json.load(f)
+
+                subcommand = message.content[11:].strip()
+                
+                if subcommand == "list":
+                    msg = "**🎭 利用可能なキャラクタープリセット**\n"
+                    for key, data in profiles.items():
+                        msg += f"- **`{key}`**: {data.get('name')} ({data.get('profile')})\n"
+                    msg += "\n設定するには `!character set [ID]` と入力してください。"
+                    await message.channel.send(msg)
+                
+                elif subcommand.startswith("set "):
+                    char_id = subcommand[4:].strip()
+                    if char_id in profiles:
+                        memory.set_character_setting(session_id, profiles[char_id])
+                        await message.channel.send(f"✅ キャラクターを **{profiles[char_id]['name']}** に設定しました。これ以降の回答が調整されます。")
+                    else:
+                        await message.channel.send(f"❌ キャラクター `{char_id}` は見つかりません。`!character list` で確認してください。")
+                
+                elif subcommand == "off":
+                    memory.set_character_setting(session_id, None)
+                    await message.channel.send("✅ キャラクター設定を解除しました。通常の口調に戻ります。")
+                
+                elif subcommand == "info":
+                    current = memory.get_character_setting(session_id)
+                    if current:
+                        await message.channel.send(f"🎭 **現在のキャラクター名**: {current.get('name')}\n**プロフィール**: {current.get('profile')}")
+                    else:
+                        await message.channel.send("🎭 現在キャラクター設定は有効になっていません。")
+                else:
+                    await message.channel.send("使用法: `!character [list|set|off|info]`")
+                return
+
             # MCP サーバー追加 (!add_mcp)
             if is_add_mcp:
                 content = message.content[9:].strip()
@@ -250,6 +295,10 @@ class ClawSporeClient(discord.Client):
             # ヘルプコマンド (!help)
             if is_help:
                 help_msg = """**🛠️ ClawSpore 専用コマンド一覧**
+- `!character list` : 利用可能なキャラクタープリセットを表示します。
+- `!character set [名前]` : 指定したキャラクターをこのチャンネルに適用します。
+- `!character off` : キャラクター設定を解除し、標準の口調に戻します。
+- `!character info` : 現在適用されているキャラクター設定を表示します。
 - `!list_tools` : 登録されているすべてのツール（標準/動的/MCP）を表示します。
 - `!list_mcp` : 現在接続中の MCP サーバーと提供ツールの一覧を表示します。
 - `!add_mcp [コマンド]` : 新しい MCP サーバーを接続・登録します（改行後に環境変数指定可）。
@@ -426,10 +475,7 @@ class ClawSporeClient(discord.Client):
                         await message.channel.send(f"実行中にエラーが発生しました: {e}")
                 return
 
-            # 簡単な挨拶への即時応答
-            if prompt == 'こんにちは' or prompt == 'こんにちは！':
-                await message.channel.send('こんにちは！何かお手伝いできることはありますか？')
-                return
+
 
             # 簡単な疎通確認用
             if message.content == '!hello':

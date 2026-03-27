@@ -420,6 +420,15 @@ IMPORTANT:
                                     filtered_content = filtered_content.replace(dead_url, "[無効なリンクを削除しました]")
                     
                     # 正常時、または修正限界後の送信
+                    
+                    # --- Character Adjustment (追加) ---
+                    character_setting = memory.get_character_setting(session_id)
+                    if character_setting:
+                        print(f"Agent: Adjusting response to character '{character_setting.get('name')}'")
+                        adjusted_content = await self._adjust_to_character(filtered_content, character_setting)
+                        if adjusted_content:
+                            filtered_content = adjusted_content
+                    
                     await send_callback(filtered_content)
                 else:
                     await send_callback("...（処理を継続しています）")
@@ -609,12 +618,18 @@ Provide the summary in a concise Japanese bulleted list."""
 ### 指針:
 - 過去のプロジェクトの進捗確認
 - 過去に興味を示したトピックの深掘り
-- もし最近のニュースに関連するものがあればそれ
-- 上記を踏まえた自然な語りかけ（日本語）
+- 自然な語りかけ（日本語）
+- 指定されたキャラクターがいる場合は、その口調を守ること。
 
 話題のみを1つ提供してください。余計な前置きは不要です。"""
 
         messages = [{"role": "system", "content": "あなたは自律的な会話スターターです。"}, {"role": "user", "content": prompt}]
+        
+        # キャラクター設定を反映
+        character_setting = memory.get_character_setting(session_id)
+        if character_setting:
+            messages[0]["content"] += f"\n現在のキャラクター設定: {character_setting.get('name')}\n{character_setting.get('instruction')}"
+
         try:
             # 常に Gemini (または最新モデル) を使用して質の高い話題を生成
             response = await llm.chat(messages, use_gemini=True)
@@ -623,6 +638,50 @@ Provide the summary in a concise Japanese bulleted list."""
         except Exception as e:
             print(f"DEBUG: Error in generate_topic: {e}")
         return "こんにちは！何かお手伝いできることはありますか？"
+
+    async def _adjust_to_character(self, content: str, character_setting: dict) -> str:
+        """生成された回答をキャラクターの口調や性格に合わせてリライトする"""
+        from core.llm_client import llm
+        
+        char_name = character_setting.get("name", "不明")
+        char_instruction = character_setting.get("instruction", "")
+        char_profile = character_setting.get("profile", "")
+
+        adjustment_prompt = f"""以下の「元の回答」の内容を変えずに、指定された「キャラクター設定」に基づいた口調や性格にリライトしてください。
+
+### 元の回答:
+{content}
+
+### キャラクター設定:
+- 名前: {char_name}
+- プロフィール: {char_profile}
+- 口調の指示: {char_instruction}
+
+### 制約事項:
+- 元の回答に含まれる事実関係、情報、指示、コード、URLは一切変更しないでください。
+- 丁寧さや親しみやすさ、特定の語尾など、指示されたスタイルを徹底してください。
+- 出力はリライトされた回答テキストのみとしてください。余計な解説文や挨拶は不要です。"""
+
+        messages = [
+            {"role": "system", "content": "あなたはプロのリライターです。指定されたキャラクターになりきって回答を調整します。"},
+            {"role": "user", "content": adjustment_prompt}
+        ]
+
+        try:
+            # 高速なローカルモデルを使用してリライトを実行
+            # LLMClient の chat メソッドを使用（デフォルトはローカルモデル）
+            response = await llm.chat(messages, use_gemini=False)
+            if response.content:
+                return response.content.strip()
+        except Exception as e:
+            print(f"Agent: Local model failed in _adjust_to_character: {e}. Falling back to Gemini...")
+            try:
+                response = await llm.chat(messages, use_gemini=True)
+                if response.content:
+                    return response.content.strip()
+            except Exception as gemini_e:
+                print(f"Agent: Gemini fallback failed: {gemini_e}")
+            return content # エラー時は元の内容を返す
 
 # シングルトンインスタンス
 agent = Agent()
